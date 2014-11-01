@@ -1,0 +1,1392 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+
+namespace ObjConsole
+{
+    struct vers
+    {
+        public double x;
+        public double y;
+        public double z;
+    }
+    struct figure
+    {
+        public string name;     //Название объекта 
+        public List<vers> list; //множество точек объекта
+
+        public double angle;    //угол поворота вокруг нашего положения относительно вертикальной оси
+        public double angle3;   //угол доворота вокруг ближайшей к нам точки отн-но верт оси 
+
+        public vers cent_geom;  //центр прямоугольного парал-да в который можно вписать
+        public vers cent_mass_v;//центр масс вычисленный по формуле по всем точкам
+        public vers cent_mass_real;//попытка посчитать реальный центр масс
+
+        public vers Min_X;      //точка с минимальной Х координатой
+        public vers Max_X;      //точка с максимальной Х координатой
+        public vers Min_Y;      //точка с минимальной Y координатой
+        public vers Max_Y;      //точка с максимальной Y координатой
+        public vers Min_Z;      //точка с минимальной Z координатой
+        public vers Max_Z;      //точка с максимальной Z координатой
+    }
+    struct ExportFigure
+    {
+        public string name;
+        public Dictionary<string,object> primitivs;
+        public class Сфера
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers center;
+            public double r;
+        }
+        public class Цилиндр
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers cent_1;
+            public vers cent_2;
+            public double r;
+        }
+        public class Параллелипипед
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers v1;
+            public vers v2;
+            public vers v3;
+            public vers v4;
+        }
+        public class Конус
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers cent_osn;
+            public vers cent_vers;
+            public double r;
+        }
+        public class Тор
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers center;
+            public vers v_in;
+            public vers v_out;
+        }
+        public class Дерево
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+            public vers v1;
+            public vers v2;
+            public vers v3;
+            public double r1;
+            public double r2;
+        }
+        public class Рамка
+        {
+            public double probability;
+            public double volume;
+            public double sr_rast;
+        }
+    }
+
+    class Program
+    {
+        static string dir = null;   //дирректория загружаемого файла
+        static List<figure> figures = null; //множество всех фигур сцены
+
+        //определелиться со значениями или давать на вход проге
+        static double min_r = 3;    //расстояние для определения принадлежности точек примитивам или удаления удаленных от других точек
+        static double MAX_r = 3000;  //расстояние для удаления далеких от нас точек сцены
+        static double e = 0.001;         //для прореживания облака точек
+        static vers our_place = new vers();      //наше положение в пространстве инициализируется 0 0 0
+
+        //убрать на готовой системе
+        static bool p = true;
+        static string[] dir0 = new string[5]{
+            "D:\\my folder\\ите\\1 маг\\3Анализ ИТ\\модели obj\\пробы\\полцилиндра плоский.obj", //0
+            "D:\\my folder\\ите\\1 маг\\3Анализ ИТ\\модели obj\\пробы\\угол.obj",                //1
+            "D:\\my folder\\ите\\1 маг\\3Анализ ИТ\\модели obj\\пробы\\сфера кусок 4 4 4 2.obj", //2
+            "D:\\my folder\\ите\\1 маг\\3Анализ ИТ\\модели obj\\пробы\\mp.obj",                  //3
+            "D:\\my folder\\ите\\1 маг\\3Анализ ИТ\\модели obj\\пробы\\сцена4об.obj"};           //4
+
+        static void Init()//загрузка точек из файла+
+        {
+
+            our_place.x = 0;
+            our_place.y = 0;
+            our_place.z = 0;
+            List<vers> list = new List<vers>();//множество всех вершин сцены
+            string[] mas = System.IO.File.ReadAllLines(dir);
+            string[] a;
+            vers v = new vers();
+            foreach (string s in mas)
+                if (s.Length > 1)
+                    if ((s[0] == 'v') && (s[1] == ' '))
+                    {
+                        a = s.Split(' ');
+                        {
+                            v.x = Convert.ToDouble(a[a.Count() - 3]);
+                            v.y = Convert.ToDouble(a[a.Count() - 2]);
+                            v.z = Convert.ToDouble(a[a.Count() - 1]);
+                            list.Add(v);
+                        }
+                    }
+            mas = null;
+            GC.Collect();
+
+            list = clear_points(list);
+
+            figures = new List<figure>();
+            figures = share_points(list);
+            list = null;
+            GC.Collect();
+        }
+
+        static List<vers> clear_points(List<vers> l)//чистка облака точек
+        {
+            if (p)
+            {
+                //удаляем далекие от нас точки и точки далекие от других точек
+                int i = 0;
+                while (i < l.Count)
+                    if (Geom.rast_vers(our_place, l[i]) > MAX_r)
+                        l.RemoveAt(i);//удалить далекую от нас точку
+                    else
+                    {//иначе смотрим все точки кроме текущей
+                        double min = MAX_r;//Geom.rast_vers(l[i], l[l.Count-1]);
+                        for (int k = 0; k < l.Count; k++)
+                            if (k != i)//ищем расстояние до ближайшей соседней
+                            {
+                                double tek_min = Geom.rast_vers(l[i], l[k]);
+                                if (tek_min < min)
+                                    min = tek_min;
+                            }
+                        if (min > min_r)
+                            l.RemoveAt(i);//удалить далекую от других точек точку
+                        else
+                            i++;
+                    }
+
+                //удалить точки земли
+
+                //удалить шумы
+
+                //прорядить оставшееся
+                i = 0;
+                while (i < l.Count-1)
+                {
+                    int j = i + 1;
+                    while (j < l.Count)
+                        if (Geom.rast_vers(l[i], l[j]) < e)
+                            l.RemoveAt(j);
+                        else 
+                            j++;
+                    i++;
+                }
+                /*  const int e = 3; const int E = 3;
+                  i = 0; int j = 0;
+                  while (i != l.Count-1)
+                  {
+                      //////шаг 3
+                      if ((Math.Abs(l[i].x - l[i + j].x) <= E) && (Math.Abs(l[i].y - l[i + j].y) <= E) && (Math.Abs(l[i].z - l[i + j].z) <= E))
+
+                      while(j<l.Count-i)
+                          if (Geom.rast_vers(l[i],l[i+j]) < e)
+                              l.RemoveAt(i + j);
+                          else
+                              j++;
+                      j = 0;
+                      i++;
+                  }*/
+
+            }
+            return l;
+        }
+
+        static List<figure> share_points(List<vers> l)//разделение точек отдельных объектов+
+        { 
+            Console.WriteLine("Разделение точек по объектам началось");
+            List<figure> Fs = new List<figure>();//
+            figure f1 = new figure();//
+            f1.name = "OBJ0";
+            f1.list = new List<vers>();
+            if (p)
+            {
+                f1.list.Add(l[0]);
+                Fs.Add(f1);
+                l.RemoveAt(0);
+
+                //распределяем точки по отдельным объектам
+                double tek_rast, min_rast;
+                int best_fig, best_v;//лучшая фигура для вписки данной точки и номер этой точки
+
+                //проходим по точкам фигур и ищем самую близкую точку из списка к одной из точек одной из фигур
+                while (l.Count > 0)
+                {
+                    best_v = 0;
+                    best_fig = 0;
+                    min_rast = Geom.rast_vers(l[0], Fs[0].list[0]);
+                    int j = 0;  
+                    while (j < Fs.Count)
+                    {
+                        int k = 0;
+                        while (k < Fs[j].list.Count)
+                        {
+                            int i = 0;
+                            while (i < l.Count)
+                            {
+                                if ((k == 0) && (j == 0) && (i == 0))
+                                {
+
+                                }
+                                else
+                                {
+                                    tek_rast = Geom.rast_vers(l[i], Fs[j].list[k]);
+                                    if (tek_rast < min_rast)
+                                    {
+                                        min_rast = tek_rast;
+                                        best_fig = j;
+                                        best_v = i;
+                                    }
+                                    if (min_rast <= min_r)
+                                    {
+                                        //выйти из циклов 
+                                        j = Fs.Count-1;
+                                        k = Fs[j].list.Count;
+                                        i = l.Count;
+                                    }
+                                }
+                                i++;
+                            }
+                            k++;
+                        }
+                        j++;
+                    }
+                    if (min_rast <= min_r)//если наименьшее расстояние от точки списка до точки объекта меньше константы то 
+                    {//добавляем точку к объекту
+                        figure fn = new figure();
+                        fn = Fs[best_fig];
+                        fn.list.Add(l[best_v]);
+                        Fs[best_fig] = fn;
+                    }
+                    else
+                    {//а если нет добавляем ее к новому объекту
+                        figure f2 = new figure();
+                        f2.name = "OBJ" + Fs.Count.ToString();
+                        f2.list = new List<vers>();
+                        f2.list.Add(l[best_v]);
+                        Fs.Add(f2);
+                    }
+                    l.RemoveAt(best_v);
+                }
+            }
+            else
+            {//разделить точки на объекты по четвертям
+                figure fn1 = new figure(); fn1.name = "OBJ0"; fn1.list = new List<vers>();
+                figure fn2 = new figure(); fn2.name = "OBJ1"; fn2.list = new List<vers>();
+                figure fn3 = new figure(); fn3.name = "OBJ2"; fn3.list = new List<vers>();
+                figure fn4 = new figure(); fn4.name = "OBJ3"; fn4.list = new List<vers>();
+                while (l.Count > 0)
+                {
+                    if ((l[0].x < 0) && (l[0].z < 0))
+                        fn1.list.Add(l[0]);
+                    else if ((l[0].x > 0) && (l[0].z < 0))
+                        fn2.list.Add(l[0]);
+                    else if ((l[0].x < 0) && (l[0].z > 0))
+                        fn3.list.Add(l[0]);
+                    else if ((l[0].x > 0) && (l[0].z > 0))
+                        fn4.list.Add(l[0]);
+                    l.RemoveAt(0);
+                }
+                if (fn1.list.Count > 0) Fs.Add(fn1);
+                if (fn2.list.Count > 0) Fs.Add(fn2);
+                if (fn3.list.Count > 0) Fs.Add(fn3);
+                if (fn4.list.Count > 0) Fs.Add(fn4);
+
+                //figure fnn = new figure(); fnn.name = "OBJ0"; fnn.list = new List<vers>(); fnn.list = l; Fs.Add(fnn);//все точки - одна фигура
+            }
+
+            //удалим объекты количество точек которых 1
+            int q = 0;
+            while (q < Fs.Count)
+                if (Fs[q].list.Count < 2)
+                    Fs.RemoveAt(q);
+                else
+                    q++;
+            l = null;
+            GC.Collect();
+            Console.WriteLine("Разделение точек по объектам закончилось");
+            return Fs;
+        }
+
+        static void Main_inscribe()
+        {
+            ExportFigure[] EF = new ExportFigure[figures.Count];
+            figure f2, f3;
+            string[] primitivs = new string[7] { "Сфера", "Параллелипипед", "Цилиндр", "Конус", "Тор", "Дерево", "Рамка" };
+            //множество точек каждого объекта пытаемся вписать в различные примитивы и сохраняем тип примитива, координаты, объем
+            for (int j = 0; j < figures.Count; j++)
+            {
+                EF[j].name = figures[j].name;
+                EF[j].primitivs = new Dictionary<string, object>();
+                figure[] nabor = new figure[primitivs.Count()];//набор для вписки на месте располежения объекта
+
+                //ищем 6 точек c максимальными/минимальными координатами
+                figures[j] = Geom.find_Min_Max(figures[j]);
+                figures[j] = Geom.find_center(figures[j]);
+                figures[j] = Geom.find_center_mass(figures[j]);
+
+                vers min_rast = new vers();//ближайшая к нам точка основной фигуры
+                vers min_rast2 = new vers();//после поворота на плоскость YZ
+                vers min_rast3 = new vers();//после поворота на ось X
+                {
+                    {//цилиндр
+                        f2 = new figure();
+                        f2.name = figures[j].name;
+                        vers[] a = new vers[figures[j].list.Count];
+                        figures[j].list.CopyTo(a);
+                        f2.list = a.ToList();
+                        f2.Max_X = figures[j].Max_X; f2.Max_Y = figures[j].Max_Y; f2.Max_Z = figures[j].Max_Z;
+                        f2.Min_X = figures[j].Min_X; f2.Min_Y = figures[j].Min_Y; f2.Min_Z = figures[j].Min_Z;
+
+
+                        //найдем ближайшую к нам точку объекта
+                        min_rast = f2.list[0];
+                        double p, rast = Geom.rast_vers(our_place, f2.list[0]);
+                        for (int i = 1; i < f2.list.Count; i++)
+                        {
+                            p = Geom.rast_vers(our_place, f2.list[i]);
+                            if (rast > p)
+                            {
+                                rast = p;
+                                min_rast = f2.list[i];
+                            }
+                        }
+                        //Повернем все точки так чтобы ближайшая к нам точка оказалась на оси Z
+                        f2.angle = (Math.Atan2(min_rast.x, min_rast.z));
+                        min_rast2 = Geom.vrash_os(min_rast, our_place, 'Y', f2.angle);
+                        for (int i = 0; i < f2.list.Count; i++)
+                            f2.list[i] = Geom.vrash_os(f2.list[i], our_place, 'Y', f2.angle);
+
+                        f2 = Geom.find_Min_Max(f2);
+                        f2 = Geom.find_center(f2);
+                        f2 = Geom.find_center_mass(f2);
+                    }
+                    {//сфера
+                        f3 = new figure();
+                        f3.name = f2.name;
+                        vers[] c = new vers[f2.list.Count];
+                        f2.list.CopyTo(c);
+                        f3.list = c.ToList();
+                        f3.angle = f2.angle;
+                        f3.Max_X = f2.Max_X; f3.Max_Y = f2.Max_Y; f3.Max_Z = f2.Max_Z;
+                        f3.Min_X = f2.Min_X; f3.Min_Y = f2.Min_Y; f3.Min_Z = f2.Min_Z;
+                        f3.cent_geom = f2.cent_geom; f3.cent_mass_v = f2.cent_mass_v;
+
+                        min_rast3 = min_rast2;
+                        f3.angle3 = Math.Abs(Math.Atan2(min_rast3.y, min_rast3.z));
+                        for (int i = 0; i < f3.list.Count; i++)
+                            f3.list[i] = Geom.vrash_os(f3.list[i], our_place, 'X', f3.angle3);
+                        min_rast3 = Geom.vrash_os(min_rast2, our_place, 'X', f3.angle3);
+
+                        f3 = Geom.find_Min_Max(f3);
+                        f3 = Geom.find_center(f3);
+                        f3 = Geom.find_center_mass(f3);
+                    }
+                }
+                double max_sr_rast = 0;
+                for (int i = 0; i < primitivs.Count(); i++)//перебираем примитивы и вписываем 
+                {
+                    nabor[i] = figures[j];
+                    figure qqq = new figure(); qqq = nabor[i];
+                    qqq.angle = f2.angle; qqq.angle3 = f3.angle3;
+                    switch (primitivs[i])
+                    {
+                        case "Сфера":
+                            qqq.cent_mass_real = Geom.vrash_os(Geom.vrash_os(Geom.find_real_center_elips(f3, min_rast3), our_place, 'X', 2 * Math.PI - qqq.angle3), our_place, 'Y', qqq.angle);
+                            nabor[i] = qqq;
+                            ExportFigure.Сфера el = new ExportFigure.Сфера();
+                            el.probability = 0; el.sr_rast = 0; el.volume = 0;
+                            el = Inscribe.elipsoid_incribe(nabor[i]);
+                            if ((el.sr_rast > 0) && (el.sr_rast > max_sr_rast))
+                                max_sr_rast = el.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], el);
+                            break;
+                        case "Параллелипипед":
+                            nabor[i] = qqq;
+                            ExportFigure.Параллелипипед C = new ExportFigure.Параллелипипед();
+                            C.probability = 0; C.sr_rast = 0; C.volume = 0;
+                            C = Inscribe.parall_incribe(nabor[i], our_place);
+                            if ((C.sr_rast > 0) && (C.sr_rast > max_sr_rast))
+                                max_sr_rast = C.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], C);
+                            break;
+                        case "Цилиндр":
+                            qqq.cent_mass_real = Geom.vrash_os(Geom.find_real_center_vert_cyl(f2, min_rast2), our_place, 'Y', qqq.angle);
+                            nabor[i] = qqq;//центр одного основания, центр второго основания, радиус
+                            ExportFigure.Цилиндр cylin = new ExportFigure.Цилиндр();
+                            cylin.probability = 0; cylin.sr_rast = 0; cylin.volume = 0;
+                            cylin = Inscribe.cylinder_incribe(nabor[i]);
+                            if ((cylin.sr_rast > 0) && (cylin.sr_rast > max_sr_rast))
+                                max_sr_rast = cylin.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], cylin);
+                            break;
+                        case "Конус":
+                            qqq.cent_mass_real = Geom.vrash_os(Geom.find_real_center_vert_cyl(f2, min_rast2), our_place, 'Y', qqq.angle);
+                            nabor[i] = qqq;//координаты центра основания, координаты вершины, радиус
+                            ExportFigure.Конус cone = new ExportFigure.Конус();
+                            cone.probability = 0; cone.sr_rast = 0; cone.volume = 0;
+                            cone = Inscribe.cone_incribe(nabor[i]);
+                            if ((cone.sr_rast > 0) && (cone.sr_rast > max_sr_rast))
+                                max_sr_rast = cone.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], cone);
+                            break;
+                        case "Тор":
+                            //vers p = new vers(); p.x = 0; p.y = qqq.Min_Y.y; p.z = 0; qqq.cent_mass_real = p;
+                            nabor[i] = qqq;//координаты центра, к-та точки внутренней, к-та точки внешней
+                            ExportFigure.Тор tor = new ExportFigure.Тор();
+                            tor.probability = 0; tor.sr_rast = 0; tor.volume = 0;
+                            tor = Inscribe.tor_incribe(nabor[i], min_r);
+                            if ((tor.sr_rast > 0) && (tor.sr_rast > max_sr_rast))
+                                max_sr_rast = tor.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], tor);
+                            break;
+
+                        case "Дерево"://координаты верхушки, соединения, низа(все на прямой), радиус конуса, цилиндра
+                            ExportFigure.Дерево tree = new ExportFigure.Дерево();
+                            tree.probability = 0; tree.sr_rast = 0; tree.volume = 0;
+                            tree = Inscribe.tree_incribe(nabor[i]);
+                            if ((tree.sr_rast > 0) && (tree.sr_rast > max_sr_rast))
+                                max_sr_rast = tree.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], tree);
+                            break;
+                        case "Рамка":
+                            ExportFigure.Рамка gate = new ExportFigure.Рамка();
+                            gate.probability = 0; gate.sr_rast = 0; gate.volume = 0;
+                            gate = Inscribe.gate_incribe(nabor[i]);
+                            if ((gate.sr_rast > 0) && (gate.sr_rast > max_sr_rast))
+                                max_sr_rast = gate.sr_rast;
+                            EF[j].primitivs.Add(primitivs[i], gate);
+                            break;
+                        default:
+
+                            break;
+                    }
+                }
+                //нормируем верность вписки всех примитивов к промежутку от 0 до 1 по расстоянию от вершин до поверхности примитива
+                for (int i = 0; i < primitivs.Count(); i++)
+                {
+                    var obj = EF[j].primitivs[primitivs[i]];
+                    if (obj is ExportFigure.Дерево)
+                    {
+                        if ((obj as ExportFigure.Дерево).sr_rast > 0)
+                            (obj as ExportFigure.Дерево).probability = 1 - (obj as ExportFigure.Дерево).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Конус)
+                    {
+                        if ((obj as ExportFigure.Конус).sr_rast > 0)
+                            (obj as ExportFigure.Конус).probability = 1 - (obj as ExportFigure.Конус).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Параллелипипед)
+                    {
+                        if ((obj as ExportFigure.Параллелипипед).sr_rast > 0)
+                            (obj as ExportFigure.Параллелипипед).probability = 1 - (obj as ExportFigure.Параллелипипед).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Рамка)
+                    {
+                        if ((obj as ExportFigure.Рамка).sr_rast > 0)
+                            (obj as ExportFigure.Рамка).probability = 1 - (obj as ExportFigure.Рамка).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Сфера)
+                    {
+                        if ((obj as ExportFigure.Сфера).sr_rast > 0)
+                            (obj as ExportFigure.Сфера).probability = 1 - (obj as ExportFigure.Сфера).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Тор)
+                    {
+                        if ((obj as ExportFigure.Тор).sr_rast > 0)
+                            (obj as ExportFigure.Тор).probability = 1 - (obj as ExportFigure.Тор).sr_rast / max_sr_rast;
+                    }
+                    else if (obj is ExportFigure.Цилиндр)
+                    {
+                        if ((obj as ExportFigure.Цилиндр).sr_rast > 0)
+                            (obj as ExportFigure.Цилиндр).probability = 1 - (obj as ExportFigure.Цилиндр).sr_rast / max_sr_rast;
+                    }
+                }
+
+                nabor = null;
+                GC.Collect();
+            }
+            var json = new JavaScriptSerializer().Serialize(EF);
+            Console.WriteLine("Готово");
+            System.IO.File.WriteAllText("Info.txt", dir);
+            System.IO.File.WriteAllText("JSON_Result.txt", json);
+            figures = null; primitivs = null;
+            GC.Collect();
+        }
+
+        static void Main(string[] args)
+        {
+            while (true)
+            {//необходимо сообщать файл с координатами вершин в формате OBJ, константы e, min_r, max_r, координаты нашего положения в пространстве
+                Console.WriteLine("Введите путь к файлу");
+                dir = Console.ReadLine();
+                if (System.IO.File.Exists(dir))
+                {
+                    Init();
+                    Main_inscribe();
+                    if (System.IO.File.Exists("Visual_OBJ.exe"))
+                        System.Diagnostics.Process.Start("Visual_OBJ.exe");
+                }
+                else
+                {
+                    Console.WriteLine("Не верный путь к файлу");
+                    try//убрать на готовой системе
+                    {
+                        string[] a = dir.Split(' ');
+                        if (System.IO.File.Exists(dir0[Convert.ToInt32(a[0])]))
+                        {
+                            if (a[1] == "T")
+                                p = true;//работает полностью
+                            else p = false;//объекты делятся проще и не работает чистка
+                            dir = dir0[Convert.ToInt32(a[0])];
+                            //e = Convert.ToDouble(a[1]);
+                            //min_r = Convert.ToDouble(a[2]);
+                            //MAX_r = Convert.ToDouble(a[3]);
+                            Console.WriteLine(dir);
+                            Init();
+                            Main_inscribe();
+                            if (System.IO.File.Exists("Visual_OBJ.exe"))
+                                System.Diagnostics.Process.Start("Visual_OBJ.exe");
+                        }
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+        }
+    }
+
+    class Inscribe//функции вписки в конкретные примитивы
+    {
+        //вписка в примитивы
+        public static ExportFigure.Сфера elipsoid_incribe(figure f)
+        {
+            ExportFigure.Сфера el = new ExportFigure.Сфера();
+            //пробуем вписать используя все центры и выбираем тот результат который даст наименьший объем
+            double r1 = Geom.rast_vers(f.list[0], f.cent_geom);
+            double r2 = Geom.rast_vers(f.list[0], f.cent_mass_v);
+            double r3 = Geom.rast_vers(f.list[0], f.cent_mass_real);
+            for (int i = 1; i < f.list.Count(); i++)
+            {
+                double a1 = Geom.rast_vers(f.list[i], f.cent_geom);
+                double a2 = Geom.rast_vers(f.list[i], f.cent_mass_v);
+                double a3 = Geom.rast_vers(f.list[i], f.cent_mass_real);
+                if (a1 > r1) r1 = a1;
+                if (a2 > r2) r2 = a2;
+                if (a3 > r3) r3 = a3;
+            }
+            double sr1 = Sum_of_points.elipsoid(f.cent_geom, f.list, r1);
+            double sr2 = Sum_of_points.elipsoid(f.cent_mass_v, f.list, r2);
+            double sr3 = Sum_of_points.elipsoid(f.cent_mass_real, f.list, r3);
+            if ((sr1 <= sr2) && (sr1 <= sr3))
+            {
+                el.center = f.cent_geom;
+                el.r = r1;
+                el.sr_rast = sr1;
+            }
+            else if ((sr2 <= sr1) && (sr2 <= sr3))
+            {
+                el.center = f.cent_mass_v;
+                el.r = r2;
+                el.sr_rast = sr2;
+            }
+            else if ((sr3 <= sr1) && (sr3 <= sr2))
+            {
+                el.center = f.cent_mass_real;
+                el.r = r3;
+                el.sr_rast = sr3;
+            }
+            el.volume = Volume.elipsoid_volume(el.r, el.r, el.r);
+            return el;
+        }
+
+        public static ExportFigure.Параллелипипед parall_incribe(figure f, vers our_pl)//стоит на плоскости параллельной плоскости XZ
+        {//впишем как есть и с доворотом и выберем меньший объем
+            vers par1_v1 = new vers(); vers par1_v2 = new vers(); vers par1_v3 = new vers(); vers par1_v4 = new vers();
+            vers par2_v1 = new vers(); vers par2_v2 = new vers(); vers par2_v3 = new vers(); vers par2_v4 = new vers();
+            par1_v1.x = f.Min_X.x; par1_v1.y = f.Min_Y.y; par1_v1.z = f.Min_Z.z;
+            par1_v2.x = f.Min_X.x; par1_v2.y = f.Min_Y.y; par1_v2.z = f.Max_Z.z;
+            par1_v3.x = f.Min_X.x; par1_v3.y = f.Max_Y.y; par1_v3.z = f.Min_Z.z;
+            par1_v4.x = f.Max_X.x; par1_v4.y = f.Min_Y.y; par1_v4.z = f.Min_Z.z;
+
+            par2_v1 = f.Min_X; par2_v2 = f.Max_X; par2_v3 = f.Min_Z; par2_v4 = f.Max_Z;
+            par2_v1.y = our_pl.y; par2_v2.y = our_pl.y; par2_v3.y = our_pl.y; par2_v4.y = our_pl.y;//кладем на плоскость
+            double r1 =Geom.rast_vers(our_pl,par2_v1);
+            double r2 =Geom.rast_vers(our_pl,par2_v2);
+            double r3 =Geom.rast_vers(our_pl,par2_v3);
+            double r4 =Geom.rast_vers(our_pl,par2_v4);
+
+            if ((r1 <= r2) && (r1 <= r3) && (r1 <= r4))//выбираем ближайшую к нам точку
+            {
+                par2_v1 = f.Min_X; par2_v3 = f.Min_X;
+                par2_v2 = f.Min_Z; par2_v4 = f.Max_Z;
+            }
+            else if ((r2 <= r1) && (r2 <= r3) && (r2 <= r4))
+            {
+                par2_v1 = f.Max_X; par2_v3 = f.Max_X;
+                par2_v2 = f.Min_Z; par2_v4 = f.Max_Z;
+            }
+            else if ((r3 <= r2) && (r3 <= r1) && (r3 <= r4))
+            {
+                par2_v1 = f.Min_Z; par2_v3 = f.Min_Z;
+                par2_v2 = f.Min_X; par2_v4 = f.Max_X;
+            }
+            else 
+            {
+                par2_v1 = f.Max_Z; par2_v3 = f.Max_Z;
+                par2_v2 = f.Min_X; par2_v4 = f.Max_X;
+            }
+            par2_v1.y = f.Min_Y.y; par2_v2.y = f.Min_Y.y; par2_v3.y = f.Max_Y.y; par2_v4.y = f.Min_Y.y;
+            ////////////////////////////////////////////////////////////////////////////////////////////проверка все ли точки вписались
+
+
+            double vol1 = Volume.parall_volume(Geom.rast_vers(par1_v1, par1_v2), Geom.rast_vers(par1_v1, par1_v3), Geom.rast_vers(par1_v1, par1_v4));
+            double vol2 = Volume.parall_volume(Geom.rast_vers(par2_v1, par2_v2), Geom.rast_vers(par2_v1, par2_v3), Geom.rast_vers(par2_v1, par2_v4));
+            ExportFigure.Параллелипипед P = new ExportFigure.Параллелипипед();
+            if (vol1 < vol2)//выбираем лучший вариант по объему
+            {
+                P.v1 = par1_v1; P.v2 = par1_v2; P.v3 = par1_v3; P.v4 = par1_v4;
+                P.volume = vol1;
+                P.sr_rast = Sum_of_points.paral(P.v1, P.v2, P.v3, P.v4, f.list);
+            }
+            else
+            {
+                P.v1 = par2_v1; P.v2 = par2_v2; P.v3 = par2_v3; P.v4 = par2_v4;
+                P.volume = vol2;
+                P.sr_rast = Sum_of_points.paral(P.v1, P.v2, P.v3, P.v4, f.list);
+            }
+            return P;
+        }
+        //есть проблемы, не верно вписываются округлые фигуры
+
+        public static ExportFigure.Цилиндр cylinder_incribe(figure f)//перпендикулярный одной из осей
+        {//цилиндр строится плоскостями перпендикулярными осям, максимальное расстояние между плоскостями - его высота
+            ExportFigure.Цилиндр C = new ExportFigure.Цилиндр();
+            vers vert_vect = new vers(); vert_vect.x = 0; vert_vect.y = 1; vert_vect.z = 0;//просто вертикальный вектор
+
+            vers vert1_v1 = new vers(); vers vert1_v2 = new vers(); vert1_v1.x = f.cent_geom.x; vert1_v1.y = f.Min_Y.y; vert1_v1.z = f.cent_geom.z;
+            vers vert2_v1 = new vers(); vers vert2_v2 = new vers(); vert2_v1.x = f.cent_mass_v.x; vert2_v1.y = f.Min_Y.y; vert2_v1.z = f.cent_mass_v.z;
+            vers vert3_v1 = new vers(); vers vert3_v2 = new vers(); vert3_v1.x = f.cent_mass_real.x; vert3_v1.y = f.Min_Y.y; vert3_v1.z = f.cent_mass_real.z;
+            vert3_v2 = vert3_v1; vert2_v2 = vert2_v1; vert1_v2 = vert1_v1; vert1_v2.y = f.Max_Y.y; vert2_v2.y = f.Max_Y.y; vert3_v2.y = f.Max_Y.y;
+
+            vers v1 = new vers(); vers v2 = new vers();
+            double[] rast_pl = new double[3];
+            rast_pl[0] = Geom.rast_plos(f.Max_X.x, f.Min_X.x);
+            rast_pl[1] = Geom.rast_plos(f.Max_Y.y, f.Min_Y.y);
+            rast_pl[2] = Geom.rast_plos(f.Max_Z.z, f.Min_Z.z);
+
+            vers vect = new vers();
+            if ((rast_pl[0] >= rast_pl[1]) && (rast_pl[0] >= rast_pl[2]))
+            {
+                vect.x = f.Max_X.x - f.cent_geom.x; v1.x = f.Min_X.x;     v2.x = f.Max_X.x;
+                vect.y = 0;                         v1.y = f.cent_geom.y; v2.y = f.cent_geom.y;
+                vect.z = 0;                         v1.z = f.cent_geom.z; v2.z = f.cent_geom.z;
+            }
+            else if ((rast_pl[1] >= rast_pl[0]) && (rast_pl[1] >= rast_pl[2]))
+            {
+                vect.x = 0;                         v1.x = f.cent_geom.x; v2.x = f.cent_geom.x;
+                vect.y = f.Max_Y.y - f.cent_geom.y; v1.y = f.Min_Y.y;     v2.y = f.Max_Y.y;
+                vect.z = 0;                         v1.z = f.cent_geom.z; v2.z = f.cent_geom.z;
+            }
+            else if ((rast_pl[2] >= rast_pl[1]) && (rast_pl[0] >= rast_pl[0]))
+            {
+                vect.x = 0;                         v1.x = f.cent_geom.x; v2.x = f.cent_geom.x;
+                vect.y = 0;                         v1.y = f.cent_geom.y; v2.y = f.cent_geom.y;
+                vect.z = f.Max_Z.z - f.cent_geom.z; v1.z = f.Min_Z.z;     v2.z = f.Max_Z.z;
+            }
+
+            double r = Geom.rast_vers_pryam(f.list[0], v1, vect);
+            double r_v1 = Geom.rast_vers_pryam(f.list[0], f.cent_geom, vert_vect);
+            double r_v2 = Geom.rast_vers_pryam(f.list[0], f.cent_mass_v, vert_vect);
+            double r_v3 = Geom.rast_vers_pryam(f.list[0], f.cent_mass_real, vert_vect);
+            for (int i = 1; i < f.list.Count(); i++)
+            {
+                double a = Geom.rast_vers_pryam(f.list[i], v1, vect);
+                double a_v1 = Geom.rast_vers_pryam(f.list[i], f.cent_geom, vert_vect);
+                double a_v2 = Geom.rast_vers_pryam(f.list[i], f.cent_mass_v, vert_vect);
+                double a_v3 = Geom.rast_vers_pryam(f.list[i], f.cent_mass_real, vert_vect);
+                if (a > r) r = a;
+                if (a_v1 > r_v1) r_v1 = a_v1;
+                if (a_v2 > r_v2) r_v2 = a_v2;
+                if (a_v3 > r_v3) r_v3 = a_v3;
+            }
+            double Vol = Volume.cylinder_volume(r, Geom.rast_vers(v1, v2));
+            double Vol_v1 = Volume.cylinder_volume(r_v1, f.Max_Y.y - f.Min_Y.y);
+            double Vol_v2 = Volume.cylinder_volume(r_v2, f.Max_Y.y - f.Min_Y.y);
+            double Vol_v3 = Volume.cylinder_volume(r_v3, f.Max_Y.y - f.Min_Y.y);
+
+            double Sr = Sum_of_points.cylinder(v1, v2, f.list, r);
+            double Sr_v1 = Sum_of_points.cylinder(vert1_v1, vert1_v2, f.list, r_v1);
+            double Sr_v2 = Sum_of_points.cylinder(vert2_v1, vert2_v2, f.list, r_v2);
+            double Sr_v3 = Sum_of_points.cylinder(vert3_v1, vert3_v2, f.list, r_v3);
+
+
+            if ((Sr <= Sr_v1) && (Sr <= Sr_v2) && (Sr <= Sr_v3))
+            {
+                C.cent_1 = v1;
+                C.cent_1 = v2;
+                C.r = r;
+                C.sr_rast = Sr; C.volume = Vol;
+            }
+            else if ((Sr_v1 <= Sr) && (Sr_v1 <= Sr_v2) && (Sr_v1 <= Sr_v3))
+            {
+                C.cent_1 = vert1_v1;
+                C.cent_2 = vert1_v2;
+                C.r = r_v1;
+                C.sr_rast = Sr_v1; C.volume = Vol_v1;
+            }
+            else if ((Sr_v2 <= Sr_v1) && (Sr_v2 <= Sr) && (Sr_v2 <= Sr_v3))
+            {
+                C.cent_1 = vert2_v1;
+                C.cent_2 = vert2_v2;
+                C.r = r_v2;
+                C.sr_rast = Sr_v2; C.volume = Vol_v2;
+            }
+            else if ((Sr_v3 <= Sr_v1) && (Sr_v3 <= Sr_v2) && (Sr_v3 <= Sr))
+            {
+                C.cent_1 = vert3_v1;
+                C.cent_2 = vert3_v2;
+                C.r = r_v3;
+                C.sr_rast = Sr_v3; C.volume = Vol_v3;
+            }
+            return C;
+        }
+
+        //надо проверить
+        public static ExportFigure.Конус cone_incribe(figure f)//вертикальный(возможно перевернутый)
+        {
+            double[] R = new double[3];
+            double[] H = new double[3];
+            double[] sum = new double[3];//сумма расстояний от точек до поверхности конуса
+            vers[] cent = new vers[3];//вершина основания
+            vers[] cent2 = new vers[3];//вершина конца
+            vers vert = new vers(); vert.x = 0; vert.y = 1; vert.z = 0;//вертикальный вектор
+            for (int i = 0; i < 3; i++)
+            {
+                if (i == 0) cent[i] = f.cent_geom;
+                else if (i == 1) cent[i] = f.cent_mass_v;
+                else if (i == 2) cent[i] = f.cent_mass_real;
+
+                //ищем макс удаленную от высоты вершину и расстояние
+                double max_r = Geom.rast_vers_pryam(f.list[0], cent[i], vert);
+                vers max_r_v = f.list[0];
+                for (int j = 1; j < f.list.Count; j++)
+                {
+                    double tek_rast = Geom.rast_vers_pryam(f.list[j], cent[i], vert);
+                    if (tek_rast > max_r)
+                    {
+                        max_r = tek_rast;
+                        max_r_v = f.list[j];
+                    }
+                }
+
+                vers a = new vers(); a.x = cent[i].x; a.y = f.Min_Y.y; a.z = cent[i].z;
+                vers b = new vers(); b.x = cent[i].x; b.y = f.Max_Y.y; b.z = cent[i].z;
+                vers c = new vers(); c.x = cent[i].x; c.y = max_r_v.y; c.z = cent[i].z;
+                //выбрать где будет основание и поставить соотв y координату
+                //куда смещена У координата центра там и основание
+
+                cent2[i] = cent[i];
+                if (Geom.rast_vers(a, cent[i]) < Geom.rast_vers(b, cent[i]))
+                {
+                    cent[i].y = f.Min_Y.y;
+                    cent2[i].y = f.Max_Y.y;
+                    double h = Math.Abs(cent[i].y - cent2[i].y);
+                    double angle = Math.Atan(max_r / Geom.rast_vers(c,cent2[i]));
+                    //если основание снизу то чтобы не терять лишнюю площадь для проезда фиксируем радиус а увеличиваем высоту
+                    //ищем максимально удаленную от поверхности внешнюю точку/////////////////////////////////////////////////////////////////
+                    double max_vnesh_r = 0;
+                    vers m = max_r_v;
+                    for (int j = 0; j < f.list.Count; j++)
+                    {
+                        vers p = new vers(); p.x = cent[i].x; p.y = f.list[j].y; p.z = cent[i].z;
+                        double r_vnutr = Geom.rast_vers(cent2[i], p) * Math.Tan(angle);
+                        double R_vnesh = Geom.rast_vers_pryam(f.list[j], cent[i], vert);
+                        double tek_rast = R_vnesh - r_vnutr;
+                        if ((tek_rast > max_vnesh_r) && (tek_rast > 0))
+                        {
+                            max_vnesh_r = tek_rast;
+                            m = f.list[j];
+                        }
+                    }
+
+                    R[i] = max_r;
+                    H[i] = max_r * Math.Tan(Math.Atan(Math.Abs(m.y-cent[i].y)/(max_r - Geom.rast_vers_pryam(m,cent[i],vert))));
+                    cent2[i].y = cent[i].y + H[i];
+                }
+                else
+                {
+                    cent[i].y = f.Max_Y.y;
+                    cent2[i].y = f.Min_Y.y;
+                    double h = Math.Abs(cent[i].y - cent2[i].y);
+                    double angle = Math.Atan(max_r / Geom.rast_vers(c,cent2[i]));//можно попробовать брать другую высоту как расстояние от вершины конуса до точки на оси на высоте максимально удаленной точки
+                    //если основание сверху то берем угол между Н и макс R 
+                    //ищем максимально удаленную от поверхности внешнюю точку
+                    double max_vnesh_r = 0;
+                    for (int j = 0; j < f.list.Count; j++)
+                    {
+                        vers p = new vers(); p.x = cent[i].x; p.y = f.list[j].y; p.z = cent[i].z;
+                        double r_vnutr = Geom.rast_vers(cent2[i], p) * Math.Tan(angle);
+                        double R_vnesh = Geom.rast_vers_pryam(f.list[j], cent[i], vert);
+                        double tek_rast = R_vnesh - r_vnutr;
+                        if ((tek_rast > max_vnesh_r) && (tek_rast > 0))
+                            max_vnesh_r = tek_rast;
+                    }
+                    //пропорционально увеличиваем радиус и высоту используя найденный ранее угол
+                    R[i] = max_r + max_vnesh_r;
+                    H[i] = R[i] / Math.Tan(angle);
+                    cent2[i].y = cent[i].y - H[i]; 
+                }
+                sum[i] = Sum_of_points.cone(cent[i], cent2[i], R[i], f.list);
+
+                /*фуфловый алгоритм
+                vers s = new vers();
+                s.x = cent[i].x; s.y = max_r_v.y; s.z = cent[i].z;
+                double h = Geom.rast_vers(cent[i], s);
+                double angle = Math.Atan(h / max_r);
+                H[i] = h + max_r / Math.Tan(angle);
+                R[i] = max_r + h * Math.Tan(angle);
+                if (cent[i].y == f.Min_Y.y)
+                    cent2[i].y = cent[i].y + H[i];
+                else cent2[i].y = cent[i].y - H[i];
+                sum[i] = Sum_of_points.cone(cent[i], cent2[i], R[i], f.list);
+                //дополнительный проход по всем точкам, искать точку которая не попала и максимально удалена, изменить радиус
+                 */
+             }
+
+            ExportFigure.Конус C = new ExportFigure.Конус();
+            int min_sum = 0;
+            byte d = 0;
+            while (d < 3)
+            {
+                if ((sum[d] != Double.NaN) && (!Double.IsInfinity(H[d])) && (sum[d] > 0))
+                {
+                    min_sum = d;
+                    d = 3;
+                }
+                d++;
+            }
+            if (d == 3)//((sum[min_sum] == double.NaN)||(sum[min_sum]<0))
+            {//все плохо
+                C.sr_rast = 0;
+                C.volume = 0;
+            }
+            else
+            {
+                for (int i = 0; i < 3; i++)
+                    if ((sum[min_sum] > sum[i]) && (sum[i] != Double.NaN)&&(sum[i]>0))
+                        min_sum = i;
+
+                C.cent_osn = cent[min_sum];
+                C.cent_vers = cent2[min_sum];
+                C.r = R[min_sum];
+                C.sr_rast = sum[min_sum];
+                C.volume = Volume.cone_volume(R[min_sum], H[min_sum]);//Geom.rast_vers(cent[min_sum], cent2[min_sum]));
+            }
+            return C;
+        }
+
+        public static ExportFigure.Тор tor_incribe(figure f, double min_r)
+        {
+            const int n = 3;
+            vers[] min_v = new vers[3];
+            vers[] max_v = new vers[3];
+
+            double[] sum = new double[3];//сумма расстояний от точек до поверхности конуса
+            vers[] cent = new vers[3];//центр
+
+            for (int i = 0; i < n; i++)
+            {
+                if (i == 0) cent[i] = f.cent_geom;
+                else if (i == 1) cent[i] = f.cent_mass_v;
+                else if (i == 2) cent[i] = f.cent_mass_real;
+                cent[i].y = f.Min_Y.y;
+
+                    //ищем ближайшую и адльнейшую от центра вершины и расстояния до них
+                    double min_rast = Geom.rast_vers(cent[i], f.list[0]);
+                    min_v[i] = f.list[0];
+                    double max_rast = Geom.rast_vers(cent[i], f.list[0]);
+                    max_v[i] = f.list[0];
+                    for (int j = 1; j < f.list.Count; j++)
+                    {
+                        double tek_rast = Geom.rast_vers(cent[i], f.list[j]);
+                        if (tek_rast < min_rast)
+                        {
+                            min_rast = tek_rast;
+                            min_v[i] = f.list[j];
+                        }
+                        else if (tek_rast > max_rast)
+                        {
+                            max_rast = tek_rast;
+                            max_v[i] = f.list[j];
+                        }
+                    }
+
+
+                //если ближайшее расстояние меньше расстояния для определения точек фигурам то нет смысла вписывать в тор и считаем сумму 0
+                if ((Geom.rast_vers(cent[i], min_v[i]) < min_r))// && (Geom.rast_vers(cent[i],max_v[i])>))///////////////////////////////////////////////////////////////
+                    sum[i] = Sum_of_points.tor(cent[i], min_v[i], max_v[i], f.list);
+                else
+                    sum[i] = 0;
+            }
+
+            ExportFigure.Тор T = new ExportFigure.Тор();
+            //выберем лучший вариант по наименьшей сумме расстояний от точек до поверхности тора
+            double a = sum.Max();
+            if (a == 0)//если все = 0 то тогда не упираемся и не вписываем в тор
+            {
+                T.sr_rast = 0;
+                T.volume = 0;
+            }
+            else
+            {
+                int min_count = 0;
+                for (int i = 0; i < n; i++)
+                    if ((sum[i]!=0) && (sum[i]<=a))
+                        min_count = i;
+                T.center = cent[min_count];
+                T.v_in = min_v[min_count];
+                T.v_out = max_v[min_count];
+                T.sr_rast = Sum_of_points.tor(cent[min_count], min_v[min_count], max_v[min_count], f.list);
+                T.volume = Volume.tor_volume(Geom.rast_vers(cent[min_count], max_v[min_count]), Geom.rast_vers(cent[min_count], min_v[min_count]));
+            }
+            return T;
+        }
+
+        //еще не работает
+        public static ExportFigure.Дерево tree_incribe(figure f)
+        {
+            ExportFigure.Дерево T = new ExportFigure.Дерево();
+            vers v1 = new vers();
+            vers v2 = new vers();
+            vers v3 = new vers();
+            T.v1 = v1;
+            T.v2 = v2;
+            T.v3 = v3;
+            T.r1 = 0;
+            T.r2 = 0;
+
+
+            /*
+            vers v1 = new vers();
+            vers v2 = new vers();
+            double[] rast_pl = new double[3];
+            rast_pl[0] = Geom.rast_plos(f.Max_X.x, f.Min_X.x);
+            rast_pl[1] = Geom.rast_plos(f.Max_Y.y, f.Min_Y.y);
+            rast_pl[2] = Geom.rast_plos(f.Max_Z.z, f.Min_Z.z);
+
+            vers vect = new vers();
+            if ((rast_pl[0] >= rast_pl[1]) && (rast_pl[0] >= rast_pl[2]))
+            {
+                vect.x = f.Max_X.x - f.cent_geom.x;
+                vect.y = 0;
+                vect.z = 0;
+                f.place_info[5] = 0;
+            }
+            else if ((rast_pl[1] >= rast_pl[0]) && (rast_pl[1] >= rast_pl[2]))
+            {
+                vect.x = 0;
+                vect.y = f.Max_Y.y - f.cent_geom.y;
+                vect.z = 0;
+                f.place_info[5] = 1;
+            }
+            else if ((rast_pl[2] >= rast_pl[1]) && (rast_pl[0] >= rast_pl[0]))
+            {
+                vect.x = 0;
+                vect.y = 0;
+                vect.z = f.Max_Z.z - f.cent_geom.z;
+                f.place_info[5] = 2;
+            }
+
+            double r = Geom.rast_vers_pryam(f.list[0], v, vect);
+            for (int i = 1; i < f.list.Count(); i++)
+            {
+                double a = Geom.rast_vers_pryam(f.list[i], v, vect);
+                if (a > r) r = a;
+            }
+
+            f.place_info[0] = v1.x;
+            f.place_info[1] = v1.y;
+            f.place_info[2] = v1.z;
+            f.place_info[3] = v2.x;
+            f.place_info[4] = v2.y;
+            f.place_info[5] = v2.z;
+            f.place_info[6] = r;
+            */
+
+            T.sr_rast = Sum_of_points.tree_el(T.v1, T.v2, T.v3, T.r1, T.r2, f.list);
+            T.sr_rast = 0;
+            T.volume = Volume.tree_volume(Geom.rast_vers(T.v2, T.v3), T.r2, Geom.rast_vers(T.v1, T.v2), T.r1);
+            return T;
+        }
+
+        public static ExportFigure.Рамка gate_incribe(figure f)
+        {
+            ExportFigure.Рамка G = new ExportFigure.Рамка();
+            G.probability = 0;
+            G.sr_rast = 0;
+            G.volume = Volume.gate_volume(0, 0, 0, 0, 0); 
+            return G;
+        }
+
+    }
+
+    class Volume//вычисления объемов примитивов
+    {
+        public static double elipsoid_volume(double a, double b, double c)
+        {
+            return 4 / 3 * Math.PI * a * b * c;
+        }
+
+        public static double cone_volume(double R, double h)
+        {
+            return Math.PI * Math.Pow(R, 2) * h / 3;
+        }
+
+        public static double parall_volume(double a, double b, double c)
+        {
+            return a * b * c;
+        }
+
+        public static double cylinder_volume(double R, double h)
+        {
+            return Math.PI * Math.Pow(R, 2) * h;
+        }
+
+        public static double tor_volume(double R, double r)
+        {
+            return 2 * Math.Pow(Math.PI, 2) * Math.Pow(r, 2) * R;
+        }
+
+        public static double tree_volume(double r, double h, double R, double H)//елка
+        {
+            return cylinder_volume(r, h) + cone_volume(R, H);
+        }
+
+        public static double gate_volume(double weight, double Weight, double height, double Height, double depth)
+        {
+            return (Weight * Height - weight * height) * depth;
+        }
+
+    }
+
+    class Geom//различные геометрические вычисления в трехмерном пространстве
+    {
+        public static double rast_vers_pryam(vers a, vers b, vers vect)//расстояние от вершины до прямой
+        {
+            vers MM = new vers();
+            MM.x = b.x - a.x;
+            MM.y = b.y - a.y;
+            MM.z = b.z - a.z;
+
+            vers pr = new vers();
+            pr.x = MM.y * vect.z - MM.z * vect.y;
+            pr.y = MM.x * vect.z - MM.z * vect.x;
+            pr.z = MM.x * vect.y - MM.y * vect.x;
+
+            return Math.Sqrt(Math.Pow(pr.x, 2) + Math.Pow(pr.y, 2) + Math.Pow(pr.z, 2)) / Math.Sqrt(Math.Pow(vect.x, 2) + Math.Pow(vect.y, 2) + Math.Pow(vect.z, 2));
+        }
+
+        public static double rast_vers(vers a, vers b)//расстояние между 2 точками
+        {
+            return Math.Sqrt(Math.Pow((a.x - b.x), 2) + Math.Pow((a.y - b.y), 2) + Math.Pow((a.z - b.z), 2));
+        }
+
+        public static double rast_plos(double a, double b)//расстояние между 2 плоскостями перпендикулярными оси
+        {
+            return Math.Sqrt(Math.Pow((a - b), 2));
+        }
+
+        public static vers vrash_os(vers main, vers point_center, char axis, double radians)//Вращение вокруг координатной оси отсносительно точки на заданный угол
+        {
+            vers a = new vers();
+            switch (axis)
+            {
+                case 'X':
+                    a.x = main.x;
+                    a.y = point_center.y + (main.y - point_center.y) * Math.Cos(radians) + (point_center.z - main.z) * Math.Sin(radians);
+                    a.z = point_center.z + (main.y - point_center.y) * Math.Sin(radians) + (main.z - point_center.z) * Math.Cos(radians);
+                    return a;
+                case 'Y':
+                    a.x = point_center.x + (main.x - point_center.x) * Math.Cos(radians) + (point_center.z - main.z) * Math.Sin(radians);
+                    a.y = main.y;
+                    a.z = point_center.z + (point_center.x - main.x) * Math.Sin(radians) + (point_center.z - main.z) * Math.Cos(radians);
+                    return a;
+                case 'Z':
+                    a.x = point_center.x + (main.x - point_center.x) * Math.Cos(radians) + (point_center.y - main.y) * Math.Sin(radians);
+                    a.y = point_center.y + (main.x - point_center.x) * Math.Sin(radians) + (main.y - point_center.y) * Math.Cos(radians);
+                    a.z = main.z;
+                    return a;
+                default:
+                    a.x = 0;
+                    a.y = 0;
+                    a.z = 0;
+                    return a;
+            }
+        }
+
+        public static double rast_vers_plos(vers m, vers a, vers b, vers c)
+        {
+            vers v1 = new vers();
+            v1.x = 0 - a.x;
+            v1.y = 0 - a.y;
+            v1.z = 0 - a.z;
+
+            vers v2 = new vers();
+            v2.x = b.x - a.x;
+            v2.y = b.y - a.y;
+            v2.z = b.z - a.z;
+
+            vers v3 = new vers();
+            v3.x = c.x - a.x;
+            v3.y = c.y - a.y;
+            v3.z = c.z - a.z;
+
+            double[] Ur = new double[4];
+            Ur[0] = v2.y * v3.z - v2.z * v3.y;
+            Ur[1] = v2.z * v3.x - v2.x * v3.z;
+            Ur[2] = v2.x * v3.y - v2.y * v3.x;
+            Ur[3] = Ur[0] * v1.x + Ur[1] * v1.y + Ur[2] * v1.z;
+
+            return Math.Abs(Ur[0] * m.x + Ur[1] * m.y + Ur[2] * m.z + Ur[3]) / Math.Sqrt(Math.Pow(Ur[0], 2) + Math.Pow(Ur[1], 2) + Math.Pow(Ur[3], 2));
+        }
+
+
+        public static figure find_Min_Max(figure f)//поиск точек с мин и макс координатами объекта
+        {
+            f.Max_X = f.list[0];
+            f.Min_X = f.list[0];
+            f.Max_Y = f.list[0];
+            f.Min_Y = f.list[0];
+            f.Max_Z = f.list[0];
+            f.Min_Z = f.list[0];
+            for (int z = 1; z < f.list.Count(); z++)
+            {
+                if ((f.Max_X.x) < (f.list[z].x)) f.Max_X = f.list[z];
+                if ((f.Min_X.x) > (f.list[z].x)) f.Min_X = f.list[z];
+                if ((f.Max_Y.y) < (f.list[z].y)) f.Max_Y = f.list[z];
+                if ((f.Min_Y.y) > (f.list[z].y)) f.Min_Y = f.list[z];
+                if ((f.Max_Z.z) < (f.list[z].z)) f.Max_Z = f.list[z];
+                if ((f.Min_Z.z) > (f.list[z].z)) f.Min_Z = f.list[z];
+            }
+            return f;
+        }
+
+        public static figure find_center(figure s)//центр прямуг-го парал-да со сторонами парал-ми осям
+        {
+            s.cent_geom.x = s.Min_X.x + (s.Max_X.x - s.Min_X.x) / 2;
+            s.cent_geom.y = s.Min_Y.y + (s.Max_Y.y - s.Min_Y.y) / 2;
+            s.cent_geom.z = s.Min_Z.z + (s.Max_Z.z - s.Min_Z.z) / 2;
+            return s;
+        }
+
+        public static figure find_center_mass(figure f)//центр масс множества точек
+        {
+            double sum_x = 0, sum_y = 0, sum_z = 0;
+            for (int i = 0; i < f.list.Count; i++)
+            {
+                sum_x += f.list[i].x;
+                sum_y += f.list[i].y;
+                sum_z += f.list[i].z;
+            }
+            f.cent_mass_v.x = sum_x / f.list.Count;
+            f.cent_mass_v.y = sum_y / f.list.Count;
+            f.cent_mass_v.z = sum_z / f.list.Count;
+            return f;
+        }
+
+        public static vers find_real_center_elips(figure f, vers v)
+        {
+            vers a = new vers();vers c = new vers();
+            c = f.Min_X; c.y = 0;
+            v.x = 0; v.y = 0;
+
+            double r = rast_vers(c, v) / (2 * Math.Cos(Math.Asin(Math.Abs(c.x) / rast_vers(c, v))));
+            a.x = 0;
+            a.y = 0;
+            if (v.z < 0)
+                a.z = v.z - r;
+            else
+                a.z = v.z + r;
+            return a;
+        }
+
+        public static vers find_real_center_vert_cyl(figure f, vers v)
+        {
+            vers a = new vers();vers c = new vers();
+            c = f.Min_X;        c.y = 0;
+            v.x = 0;            v.y = 0;
+
+            double r = rast_vers(c, v) / (2 * Math.Cos(Math.Asin(Math.Abs(c.x) / rast_vers(c, v))));
+            a.x = 0;
+            a.y = f.cent_geom.y; /////////////////////////////f.cent_mass_v.y;////////////////////////////////////////
+            if (v.z < 0)
+                a.z = v.z - r;
+            else
+                a.z = v.z + r;
+            return a;
+        }
+
+        public static vers find_real_center_vert_parall(figure f)
+        {
+            return f.cent_geom;
+        }
+
+    }
+
+    class Sum_of_points//функции поиска средних расстояний от точек до поверхности примитивов
+    {
+        public static double elipsoid(vers cent, List<vers> l, double R)//среднее расстояние от точек фигуры до поверхности сферы
+        {
+            double sum = 0;
+            for (int i = 0; i < l.Count; i++)
+                sum += (R - Geom.rast_vers(l[i], cent));
+            return sum / l.Count;
+        }
+
+        public static double cone(vers v1, vers v2, double Rad, List<vers> l)//среднее расстояние от точек фигуры до боковой поверхности конуса
+        {
+            //один центр - основание
+            //второй центр - вершина
+
+            vers vector = new vers();//вектор направления высоты конуса
+            vector.x = v1.x - v2.x;
+            vector.y = v1.y - v2.y;
+            vector.z = v1.z - v2.z;
+
+            double angle = Math.Atan(Rad / Geom.rast_vers(v1, v2));//угол от высоты до окружности основания
+            double sum = 0;
+            for (int i = 0; i < l.Count; i++)
+            {
+                //найти радиус миниконуса 
+                double r = Geom.rast_vers_pryam(l[i], v1, vector);
+                //вычислить радиус конуса с основанием на поверхности основго при помощи первого угла
+                double R = (r * Math.Tan(Math.Acos(r / Geom.rast_vers(l[i], v2)))) * Math.Tan(angle);
+                sum += Math.Cos(angle) * (R - r);
+            }
+
+            return sum / l.Count;
+        }
+
+        public static double cylinder(vers one, vers two, List<vers> l, double R)//среднее расстояние от точек фигуры до боковой поверхности цилиндра
+        {
+            vers vector = new vers();
+            vector.x = one.x - two.x;
+            vector.y = one.y - two.y;
+            vector.z = one.z - two.z;
+
+            double sum = 0;
+            for (int i = 0; i < l.Count; i++)
+                sum += (R - Geom.rast_vers_pryam(l[i], one, vector));
+            return sum / l.Count;
+        }
+
+        public static double paral(vers v1, vers v2, vers v3, vers v4, List<vers> l)//среднее расстояние от точек фигуры до поверхности парал-да
+        {
+            double sum = 0;
+            double[] abc = new double[3];
+            abc[0] = Geom.rast_vers(v1, v2);
+            abc[1] = Geom.rast_vers(v1, v3);
+            abc[2] = Geom.rast_vers(v1, v4);
+            for (int i = 0; i < l.Count; i++)
+            {
+                double[] rast = new double[6];
+                rast[0] = Geom.rast_vers_plos(l[i], v1, v2, v3);
+                rast[1] = Geom.rast_vers_plos(l[i], v1, v2, v4);
+                rast[2] = Geom.rast_vers_plos(l[i], v1, v3, v4);
+                rast[3] = Math.Abs(abc[0] - rast[2]);
+                rast[4] = Math.Abs(abc[1] - rast[1]);
+                rast[5] = Math.Abs(abc[2] - rast[0]);
+                sum += rast.Min();
+            }
+            return sum / l.Count;
+        }
+
+        public static double tor(vers v1, vers v2, vers v3, List<vers> l)//среднее расстояние от точек фигуры до поверхности тора
+        {
+            double r = Geom.rast_vers(v1, v2);
+            double R = Geom.rast_vers(v1, v3);
+            double rr = (R - r) / 2;
+            double sum = 0;
+            for (int i = 0; i < l.Count; i++)
+            {
+                double h = Geom.rast_vers_plos(l[i], v1, v2, v3);
+                double ck = Math.Sqrt(Math.Pow(h, 2) + Math.Pow(Geom.rast_vers(v1, l[i]), 2));
+                sum += (rr - Math.Sqrt(Math.Pow(h, 2) + Math.Pow(Math.Abs(ck - (r + rr)), 2)));
+            }
+            return Math.Abs(sum / l.Count);
+        }
+
+        public static double tree_el(vers v1, vers v2, vers v3, double R_cone, double rr, List<vers> l)//среднее расстояние от точек фигуры до поверхности ели
+        {
+            vers vector = new vers();
+            vector.x = v1.x - v2.x;
+            vector.y = v1.y - v2.y;
+            vector.z = v1.z - v2.z;
+
+            double sum = 0;
+            double angle = Math.Tan(R_cone / Geom.rast_vers(v1, v2));//угол от высоты до окружности основания
+            for (int i = 0; i < l.Count; i++)
+            {
+                //найти радиус миниконуса 
+                double r = Geom.rast_vers_pryam(l[i], v2, vector);
+                //вычислить радиус конуса с основанием на поверхности основго при помощи первого угла
+                double R = (r * Math.Tan(Math.Acos(r / Geom.rast_vers(l[i], v2)))) * Math.Tan(angle);
+                double cone = Math.Cos(angle) * (R - r);
+
+                double cyl = (rr - Geom.rast_vers_pryam(l[i], v2, vector));
+                if (cone < cyl)
+                    sum += cone;
+                else
+                    sum += cyl;
+            }
+            return sum / l.Count;
+        }
+
+        public static double gate(vers v1, vers v2, vers v3, vers v4, List<vers> l)//среднее расстояние от точек фигуры до поверхности ворот
+        {
+            
+            double sum = 0;
+            for (int i = 0; i < l.Count; i++)
+            {
+                double[] rast = new double[6];
+                double[] abc = new double[3];
+                abc[0] = Geom.rast_vers(v1, v2);
+                abc[1] = Geom.rast_vers(v1, v3);
+                abc[2] = Geom.rast_vers(v1, v4);
+                rast[0] = Geom.rast_vers_plos(l[i], v1, v2, v3);
+                rast[1] = Geom.rast_vers_plos(l[i], v1, v2, v4);
+                rast[2] = Geom.rast_vers_plos(l[i], v1, v3, v4);
+                rast[3] = abc[0] - rast[2];
+                rast[4] = abc[1] - rast[1];
+                rast[5] = abc[2] - rast[0];
+                sum += rast.Min();
+            }
+            return sum / l.Count;
+        }
+    }
+
+}
